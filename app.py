@@ -5,7 +5,9 @@ from io import BytesIO
 from datetime import datetime, timedelta
 import json
 import os
-from config import COLORS, REGIONS, STAMP_BENEFITS
+import random
+import time
+from config import COLORS, REGIONS, STAMP_BENEFITS, SMS_CONFIG
 
 # 페이지 설정
 st.set_page_config(
@@ -14,7 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# CSS 스타일 (TCATS 디자인 적용)
+# CSS 스타일 (TCATS 디자인)
 st.markdown(f"""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap');
@@ -53,6 +55,31 @@ st.markdown(f"""
         box-shadow: 0 2px 4px rgba(0,0,0,0.05);
     }}
     
+    .verification-box {{
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 2rem;
+        border-radius: 15px;
+        text-align: center;
+        margin: 1.5rem 0;
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }}
+    
+    .verification-code {{
+        font-size: 3rem;
+        font-weight: bold;
+        letter-spacing: 1rem;
+        margin: 1rem 0;
+        color: #FFD700;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }}
+    
+    .timer {{
+        font-size: 1.5rem;
+        color: #FFD700;
+        font-weight: bold;
+    }}
+    
     .ticket-card {{
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -60,16 +87,6 @@ st.markdown(f"""
         border-radius: 10px;
         margin: 1rem 0;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
-    }}
-    
-    .seat-badge {{
-        display: inline-block;
-        background: {COLORS['warning']};
-        color: white;
-        padding: 0.5rem 1rem;
-        border-radius: 20px;
-        font-weight: bold;
-        margin: 0.5rem;
     }}
     
     .success-box {{
@@ -83,6 +100,14 @@ st.markdown(f"""
     .info-box {{
         background: #d1ecf1;
         border-left: 5px solid {COLORS['secondary']};
+        padding: 1.5rem;
+        border-radius: 5px;
+        margin: 1rem 0;
+    }}
+    
+    .warning-box {{
+        background: #fff3cd;
+        border-left: 5px solid {COLORS['warning']};
         padding: 1.5rem;
         border-radius: 5px;
         margin: 1rem 0;
@@ -122,6 +147,16 @@ if 'is_companion' not in st.session_state:
 if 'companion_ticket_data' not in st.session_state:
     st.session_state.companion_ticket_data = None
 
+# SMS 인증 관련 세션 상태
+if 'verification_code' not in st.session_state:
+    st.session_state.verification_code = None
+if 'verification_time' not in st.session_state:
+    st.session_state.verification_time = None
+if 'verification_attempts' not in st.session_state:
+    st.session_state.verification_attempts = 0
+if 'is_verified' not in st.session_state:
+    st.session_state.is_verified = False
+
 # 데이터 폴더 생성
 os.makedirs('data', exist_ok=True)
 
@@ -146,6 +181,36 @@ def search_reservation(df, name, phone_last4, performance, date, session):
         (df['회차'] == session)
     ]
     return result
+
+def generate_verification_code():
+    """인증번호 생성 (4자리)"""
+    return ''.join([str(random.randint(0, 9)) for _ in range(SMS_CONFIG['code_length'])])
+
+def send_sms_verification(phone_number, code):
+    """SMS 발송 (모의)"""
+    # 실제로는 여기서 SMS API 호출
+    # 지금은 화면에 표시만
+    st.session_state.verification_code = code
+    st.session_state.verification_time = datetime.now()
+    st.session_state.verification_attempts = 0
+    return True
+
+def check_verification_expired():
+    """인증번호 만료 여부 확인"""
+    if st.session_state.verification_time is None:
+        return True
+    
+    elapsed = (datetime.now() - st.session_state.verification_time).total_seconds()
+    return elapsed > (SMS_CONFIG['valid_minutes'] * 60)
+
+def get_remaining_time():
+    """남은 시간 계산 (초)"""
+    if st.session_state.verification_time is None:
+        return 0
+    
+    elapsed = (datetime.now() - st.session_state.verification_time).total_seconds()
+    remaining = (SMS_CONFIG['valid_minutes'] * 60) - elapsed
+    return max(0, int(remaining))
 
 def generate_qr_code(ticket_data):
     """QR 코드 생성"""
@@ -202,6 +267,10 @@ with st.sidebar:
         st.session_state.tickets = []
         st.session_state.is_companion = False
         st.session_state.companion_ticket_data = None
+        st.session_state.verification_code = None
+        st.session_state.verification_time = None
+        st.session_state.verification_attempts = 0
+        st.session_state.is_verified = False
         st.rerun()
     
     st.markdown("---")
@@ -212,6 +281,8 @@ with st.sidebar:
         st.info("1️⃣ 공연 선택")
     elif st.session_state.step == 2:
         st.info("2️⃣ 본인 확인")
+    elif st.session_state.step == 2.5:
+        st.info("📱 SMS 인증")
     elif st.session_state.step == 3:
         st.info("3️⃣ QR 발권")
 
@@ -262,7 +333,6 @@ if st.session_state.is_companion:
         if not comp_name or not comp_phone or comp_gender == "선택" or comp_region == "선택":
             st.warning("⚠️ 모든 정보를 입력해주세요.")
         else:
-            # 동반자 정보 저장
             companion_data = {
                 "등록일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 "예매번호": ticket_data.get('예매번호', 'N/A'),
@@ -275,8 +345,6 @@ if st.session_state.is_companion:
             }
             
             save_companion_info(companion_data)
-            
-            # 혜택 페이지로 이동
             st.session_state.step = 4
             st.rerun()
 
@@ -355,18 +423,125 @@ elif st.session_state.step == 2:
                     
                     if len(result) > 0:
                         st.session_state.verified_user = result
-                        st.session_state.step = 3
+                        st.session_state.step = 2.5  # SMS 인증 단계로
                         st.rerun()
                     else:
                         st.error("❌ 예매 내역을 찾을 수 없습니다.")
 
+# ==================== Step 2.5: SMS 인증 (신규!) ====================
+elif st.session_state.step == 2.5:
+    user_data = st.session_state.verified_user
+    phone_number = user_data.iloc[0]['전화번호']
+    
+    st.markdown('<div class="step-card">', unsafe_allow_html=True)
+    st.subheader("📱 SMS 본인 인증")
+    
+    st.info(f"🎭 {user_data.iloc[0]['공연명']} | 👤 {user_data.iloc[0]['이름']}님")
+    
+    # 인증번호 발송
+    if st.session_state.verification_code is None:
+        code = generate_verification_code()
+        send_sms_verification(phone_number, code)
+    
+    # 인증번호 만료 체크
+    if check_verification_expired():
+        st.markdown('<div class="warning-box">', unsafe_allow_html=True)
+        st.warning("⏰ 인증번호가 만료되었습니다. 재발송 버튼을 눌러주세요.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        
+        if st.button("🔄 인증번호 재발송", use_container_width=True):
+            code = generate_verification_code()
+            send_sms_verification(phone_number, code)
+            st.rerun()
+    else:
+        # 인증번호 표시 (모의 SMS)
+        st.markdown(f"""
+        <div class="verification-box">
+            <h3>📱 인증번호가 발송되었습니다</h3>
+            <p>{phone_number}로 인증번호를 발송했습니다.</p>
+            <p style="font-size: 0.9rem; opacity: 0.8;">(실제 서비스에서는 문자로 발송됩니다)</p>
+            <div class="verification-code">{st.session_state.verification_code}</div>
+            <div class="timer">⏰ 남은 시간: {get_remaining_time() // 60}:{get_remaining_time() % 60:02d}</div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # 인증번호 입력
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            user_code = st.text_input(
+                "인증번호 입력",
+                placeholder="4자리 숫자",
+                max_chars=4,
+                key="verification_input"
+            )
+        
+        with col2:
+            st.write("")  # 간격 조정
+            st.write("")
+            verify_button = st.button("✅ 인증하기", type="primary", use_container_width=True)
+        
+        # 인증 시도 횟수 표시
+        if st.session_state.verification_attempts > 0:
+            remaining_attempts = SMS_CONFIG['max_attempts'] - st.session_state.verification_attempts
+            st.caption(f"⚠️ 남은 시도 횟수: {remaining_attempts}회")
+        
+        # 인증 확인
+        if verify_button:
+            if not user_code:
+                st.warning("⚠️ 인증번호를 입력해주세요.")
+            elif st.session_state.verification_attempts >= SMS_CONFIG['max_attempts']:
+                st.error("❌ 최대 시도 횟수를 초과했습니다. 처음부터 다시 시도해주세요.")
+                if st.button("🔄 처음으로 돌아가기"):
+                    st.session_state.step = 1
+                    st.session_state.verification_code = None
+                    st.session_state.verification_time = None
+                    st.session_state.verification_attempts = 0
+                    st.rerun()
+            elif user_code == st.session_state.verification_code:
+                st.session_state.is_verified = True
+                st.session_state.step = 3
+                st.success("✅ 인증 성공! QR 발권 페이지로 이동합니다...")
+                time.sleep(1)
+                st.rerun()
+            else:
+                st.session_state.verification_attempts += 1
+                remaining = SMS_CONFIG['max_attempts'] - st.session_state.verification_attempts
+                st.error(f"❌ 인증번호가 일치하지 않습니다. (남은 시도: {remaining}회)")
+        
+        # 재발송 버튼
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            if st.button("🔄 인증번호 재발송", use_container_width=True):
+                code = generate_verification_code()
+                send_sms_verification(phone_number, code)
+                st.success("✅ 새로운 인증번호가 발송되었습니다!")
+                time.sleep(1)
+                st.rerun()
+        
+        with col2:
+            if st.button("← 이전", use_container_width=True):
+                st.session_state.step = 2
+                st.session_state.verification_code = None
+                st.session_state.verification_time = None
+                st.session_state.verification_attempts = 0
+                st.rerun()
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+
 # ==================== Step 3: QR 발권 (여러 장) ====================
 elif st.session_state.step == 3:
+    # 인증 확인
+    if not st.session_state.is_verified:
+        st.error("❌ 인증이 필요합니다.")
+        st.session_state.step = 2.5
+        st.rerun()
+    
     user_data = st.session_state.verified_user
     
     st.markdown(f'''
     <div class="success-box">
-        <h3>✅ {user_data.iloc[0]['이름']}님, 예매 내역이 확인되었습니다!</h3>
+        <h3>✅ {user_data.iloc[0]['이름']}님, 본인 인증이 완료되었습니다!</h3>
         <p>총 <strong>{len(user_data)}장</strong>의 티켓이 있습니다.</p>
     </div>
     ''', unsafe_allow_html=True)
@@ -411,7 +586,6 @@ elif st.session_state.step == 3:
             
             qr_image = generate_qr_code(ticket_data)
             
-            # 티켓 카드
             with st.container():
                 st.markdown(f'''
                 <div class="ticket-card">
@@ -437,7 +611,6 @@ elif st.session_state.step == 3:
                         )
                     
                     with col_b:
-                        # 동반자 공유 링크 생성
                         ticket_json = json.dumps(ticket_data)
                         share_url = f"?ticket={ticket_json}"
                         
@@ -451,6 +624,10 @@ elif st.session_state.step == 3:
         if st.button("🔄 처음으로 돌아가기", use_container_width=True):
             st.session_state.step = 1
             st.session_state.verified_user = None
+            st.session_state.verification_code = None
+            st.session_state.verification_time = None
+            st.session_state.verification_attempts = 0
+            st.session_state.is_verified = False
             st.rerun()
 
 # ==================== Step 4: 스탬프북 (동반자 혜택) ====================
@@ -481,4 +658,4 @@ elif st.session_state.step == 4:
 
 # 푸터
 st.markdown("---")
-st.caption("🎫 티켓츠 QR 발권 시스템 v1.5 - Phase 1.5 (여러 장 발권 + 동반자 정보)")
+st.caption("🎫 티켓츠 QR 발권 시스템 v2.0-A - Phase 2.0-A (모의 SMS 인증)")
