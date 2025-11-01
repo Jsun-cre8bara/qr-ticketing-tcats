@@ -8,6 +8,7 @@ import os
 import random
 import time
 from config import COLORS, REGIONS, STAMP_BENEFITS, SMS_CONFIG
+from config import COLORS, REGIONS, STAMP_BENEFITS, SMS_CONFIG, SEAT_LAYOUT
 
 # 페이지 설정
 st.set_page_config(
@@ -146,6 +147,11 @@ if 'is_companion' not in st.session_state:
     st.session_state.is_companion = False
 if 'companion_ticket_data' not in st.session_state:
     st.session_state.companion_ticket_data = None
+    # 기존 세션 상태 초기화 부분에 추가
+if 'selected_seats' not in st.session_state:
+    st.session_state.selected_seats = []
+if 'needs_seat_selection' not in st.session_state:
+    st.session_state.needs_seat_selection = False
 
 # SMS 인증 관련 세션 상태
 if 'verification_code' not in st.session_state:
@@ -161,7 +167,185 @@ if 'is_verified' not in st.session_state:
 os.makedirs('data', exist_ok=True)
 
 # ==================== 함수 정의 ====================
+def load_seat_status():
+    """좌석 현황 불러오기"""
+    try:
+        with open('data/seat_status.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
 
+def save_seat_status(status):
+    """좌석 현황 저장"""
+    with open('data/seat_status.json', 'w', encoding='utf-8') as f:
+        json.dump(status, f, ensure_ascii=False, indent=2)
+
+def get_occupied_seats(performance, date, session):
+    """예약된 좌석 목록 가져오기"""
+    status = load_seat_status()
+    try:
+        return status[performance][date][session]["occupied"]
+    except:
+        return []
+
+def is_seat_occupied(seat_id, performance, date, session):
+    """좌석이 예약되었는지 확인"""
+    occupied = get_occupied_seats(performance, date, session)
+    return seat_id in occupied
+
+def generate_seat_map(performance, date, session, selected_seats=[]):
+    """좌석 배치도 HTML 생성"""
+    if performance not in SEAT_LAYOUT:
+        return "<p>좌석 정보가 없습니다.</p>"
+    
+    layout = SEAT_LAYOUT[performance]
+    occupied_seats = get_occupied_seats(performance, date, session)
+    
+    html = f"""
+    <style>
+        .seat-container {{
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            margin: 1rem 0;
+        }}
+        .stage {{
+            background: linear-gradient(135deg, #2C3E50 0%, #34495E 100%);
+            color: white;
+            text-align: center;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin-bottom: 3rem;
+            font-size: 1.5rem;
+            font-weight: bold;
+            letter-spacing: 0.5rem;
+        }}
+        .section {{
+            margin-bottom: 2rem;
+        }}
+        .section-title {{
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            padding: 0.5rem;
+            border-radius: 5px;
+            background: {COLORS['background']};
+        }}
+        .seat-row {{
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }}
+        .seat {{
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+            border: 2px solid #ddd;
+        }}
+        .seat:hover {{
+            transform: scale(1.1);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }}
+        .seat-available {{
+            background: {COLORS['seat_available']};
+            border-color: {COLORS['secondary']};
+            color: {COLORS['text']};
+        }}
+        .seat-occupied {{
+            background: {COLORS['seat_occupied']};
+            border-color: {COLORS['seat_occupied']};
+            color: white;
+            cursor: not-allowed;
+            opacity: 0.5;
+        }}
+        .seat-selected {{
+            background: {COLORS['seat_selected']};
+            border-color: {COLORS['warning']};
+            color: {COLORS['text']};
+            box-shadow: 0 0 15px rgba(255, 215, 0, 0.5);
+        }}
+        .legend {{
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 2rem;
+            padding: 1rem;
+            background: {COLORS['background']};
+            border-radius: 10px;
+        }}
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }}
+        .legend-box {{
+            width: 30px;
+            height: 30px;
+            border-radius: 5px;
+            border: 2px solid #ddd;
+        }}
+    </style>
+    
+    <div class="seat-container">
+        <div class="stage">STAGE</div>
+    """
+    
+    for section_id, section_data in layout['sections'].items():
+        html += f"""
+        <div class="section">
+            <div class="section-title" style="background: {section_data['color']}22; color: {section_data['color']};">
+                {section_data['name']} - {section_data['price']:,}원
+            </div>
+        """
+        
+        for row in section_data['rows']:
+            html += '<div class="seat-row">'
+            
+            for seat_num in range(1, section_data['seats_per_row'] + 1):
+                seat_id = f"{row}-{seat_num:02d}"
+                
+                if seat_id in occupied_seats:
+                    seat_class = "seat seat-occupied"
+                    onclick = ""
+                elif seat_id in selected_seats:
+                    seat_class = "seat seat-selected"
+                    onclick = f"onclick=\"parent.postMessage({{type: 'seat_click', seat: '{seat_id}'}}, '*')\""
+                else:
+                    seat_class = "seat seat-available"
+                    onclick = f"onclick=\"parent.postMessage({{type: 'seat_click', seat: '{seat_id}'}}, '*')\""
+                
+                html += f'<div class="{seat_class}" {onclick}>{seat_id}</div>'
+            
+            html += '</div>'
+        
+        html += '</div>'
+    
+    html += f"""
+        <div class="legend">
+            <div class="legend-item">
+                <div class="legend-box" style="background: {COLORS['seat_available']}; border-color: {COLORS['secondary']};"></div>
+                <span>선택 가능</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background: {COLORS['seat_selected']};"></div>
+                <span>선택됨</span>
+            </div>
+            <div class="legend-item">
+                <div class="legend-box" style="background: {COLORS['seat_occupied']};"></div>
+                <span>예약됨</span>
+            </div>
+        </div>
+    </div>
+    """
+    
+    return html
 def load_reservations():
     """예매자 명부 불러오기"""
     try:
@@ -526,9 +710,136 @@ elif st.session_state.step == 2.5:
                 st.session_state.verification_time = None
                 st.session_state.verification_attempts = 0
                 st.rerun()
+    elif user_code == st.session_state.verification_code:
+    st.session_state.is_verified = True
+    
+    # 비지정석이 있는지 확인
+    has_unassigned = any(
+        pd.isna(row['좌석번호']) or row['좌석번호'] == '' 
+        for _, row in st.session_state.verified_user.iterrows()
+    )
+    
+    if has_unassigned:
+        st.session_state.needs_seat_selection = True
+        st.session_state.step = 2.7  # 좌석 선택 단계
+    else:
+        st.session_state.step = 3  # 바로 QR 발권
+    
+    st.success("✅ 인증 성공!")
+    time.sleep(1)
+    st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
+# ==================== Step 2.7: 좌석 선택 (신규!) ====================
+elif st.session_state.step == 2.7:
+    user_data = st.session_state.verified_user
+    perf = st.session_state.selected_performance
+    
+    # 비지정석 개수 확인
+    unassigned_count = sum(
+        1 for _, row in user_data.iterrows() 
+        if pd.isna(row['좌석번호']) or row['좌석번호'] == ''
+    )
+    
+    st.markdown('<div class="step-card">', unsafe_allow_html=True)
+    st.subheader("🪑 좌석 선택")
+    
+    st.info(f"🎫 비지정석 {unassigned_count}장의 좌석을 선택해주세요!")
+    
+    # 좌석 배치도 표시
+    seat_map_html = generate_seat_map(
+        perf['공연명'],
+        perf['공연일시'],
+        perf['회차'],
+        st.session_state.selected_seats
+    )
+    
+    st.components.v1.html(seat_map_html, height=800, scrolling=True)
+    
+    # 선택된 좌석 표시
+    if st.session_state.selected_seats:
+        st.success(f"✅ 선택된 좌석: {', '.join(st.session_state.selected_seats)}")
+    
+    # 좌석 선택 입력 (클릭 대체용)
+    st.write("### 또는 직접 입력")
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        seat_input = st.text_input(
+            "좌석 번호 입력",
+            placeholder="예: A-05",
+            key="seat_input"
+        )
+    
+    with col2:
+        st.write("")
+        st.write("")
+        if st.button("➕ 추가", use_container_width=True):
+            if seat_input:
+                seat_upper = seat_input.upper()
+                if not is_seat_occupied(seat_upper, perf['공연명'], perf['공연일시'], perf['회차']):
+                    if seat_upper not in st.session_state.selected_seats:
+                        if len(st.session_state.selected_seats) < unassigned_count:
+                            st.session_state.selected_seats.append(seat_upper)
+                            st.rerun()
+                        else:
+                            st.warning(f"⚠️ 최대 {unassigned_count}개까지만 선택할 수 있습니다.")
+                    else:
+                        st.warning("⚠️ 이미 선택된 좌석입니다.")
+                else:
+                    st.error("❌ 이미 예약된 좌석입니다.")
+    
+    # 선택 취소
+    if st.session_state.selected_seats:
+        cols = st.columns(len(st.session_state.selected_seats))
+        for idx, seat in enumerate(st.session_state.selected_seats):
+            with cols[idx]:
+                if st.button(f"❌ {seat}", key=f"remove_{seat}", use_container_width=True):
+                    st.session_state.selected_seats.remove(seat)
+                    st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
-
+    
+    # 다음 단계 버튼
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        if st.button("← 이전", use_container_width=True):
+            st.session_state.step = 2.5
+            st.session_state.selected_seats = []
+            st.rerun()
+    
+    with col2:
+        if len(st.session_state.selected_seats) == unassigned_count:
+            if st.button("✅ 좌석 확정", type="primary", use_container_width=True):
+                # 선택한 좌석을 user_data에 반영
+                unassigned_idx = 0
+                for idx, row in user_data.iterrows():
+                    if pd.isna(row['좌석번호']) or row['좌석번호'] == '':
+                        st.session_state.verified_user.at[idx, '좌석번호'] = st.session_state.selected_seats[unassigned_idx]
+                        unassigned_idx += 1
+                
+                # 좌석 현황 업데이트
+                status = load_seat_status()
+                if perf['공연명'] not in status:
+                    status[perf['공연명']] = {}
+                if perf['공연일시'] not in status[perf['공연명']]:
+                    status[perf['공연명']][perf['공연일시']] = {}
+                if perf['회차'] not in status[perf['공연명']][perf['공연일시']]:
+                    status[perf['공연명']][perf['공연일시']][perf['회차']] = {"occupied": [], "selected": []}
+                
+                status[perf['공연명']][perf['공연일시']][perf['회차']]["occupied"].extend(st.session_state.selected_seats)
+                save_seat_status(status)
+                
+                st.session_state.step = 3
+                st.success("✅ 좌석이 확정되었습니다!")
+                time.sleep(1)
+                st.rerun()
+        else:
+            st.button(
+                f"좌석 선택 ({len(st.session_state.selected_seats)}/{unassigned_count})",
+                disabled=True,
+                use_container_width=True
+            )
 # ==================== Step 3: QR 발권 (여러 장) ====================
 elif st.session_state.step == 3:
     # 인증 확인
