@@ -5,6 +5,14 @@
 # QR 코드 유효 시간 (시간 단위)
 QR_VALID_HOURS = 4
 
+# SMS 인증 설정
+SMS_CONFIG = {
+    "code_length": 4,           # 인증번호 자릿수
+    "valid_minutes": 3,         # 유효 시간 (분)
+    "max_attempts": 5,          # 최대 시도 횟수
+    "resend_cooldown": 30,      # 재발송 대기 시간 (초)
+}
+
 # TCATS 브랜드 컬러
 COLORS = {
     "primary": "#E31C25",      # 빨간색 (메인)
