@@ -2,6 +2,9 @@
 티켓츠 QR 발권 시스템 - 설정 파일
 """
 
+# Streamlit 앱 URL
+STREAMLIT_URL = "https://qr-ticketing-tcats-gogo.streamlit.app/"
+
 # QR 코드 유효 시간 (시간 단위)
 QR_VALID_HOURS = 4
 
