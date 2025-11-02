@@ -7,6 +7,7 @@ import json
 import os
 import random
 import time
+from urllib.parse import quote, unquote
 
 # config import를 try-except로 처리
 try:
@@ -433,19 +434,22 @@ if not st.session_state.is_companion:
     try:
         # 방식 1: ?companion=true&ticket_data={json}
         if 'companion' in query_params and 'ticket_data' in query_params:
-            ticket_json = query_params['ticket_data']
+            ticket_json = unquote(query_params['ticket_data'])
             st.session_state.companion_ticket_data = json.loads(ticket_json)
             st.session_state.is_companion = True
             st.rerun()
         # 방식 2: ?ticket={json} (기존 방식)
         elif 'ticket' in query_params:
-            ticket_json = query_params['ticket']
+            ticket_json = unquote(query_params['ticket'])
             st.session_state.companion_ticket_data = json.loads(ticket_json)
             st.session_state.is_companion = True
             st.rerun()
+    except json.JSONDecodeError as e:
+        st.error("❌ 티켓 정보 형식이 올바르지 않습니다. 링크를 다시 확인해주세요.")
+        st.caption(f"오류 상세: {str(e)}")
     except Exception as e:
         st.error(f"⚠️ 티켓 정보를 불러오는 중 오류가 발생했습니다: {e}")
-        pass
+        st.caption("공유 링크가 올바른지 확인해주세요.")
 
 # ==================== 동반자 정보 등록 화면 ====================
 
@@ -988,8 +992,9 @@ elif st.session_state.step == 3:
                             }
 
                             ticket_json = json.dumps(share_ticket_data, ensure_ascii=False)
+                            ticket_json_encoded = quote(ticket_json)
                             base_url = "https://jsun-cre8bara-qr-ticketing-tcats-app-tydv5m.streamlit.app"
-                            companion_url = f"{base_url}?companion=true&ticket_data={ticket_json}"
+                            companion_url = f"{base_url}?companion=true&ticket_data={ticket_json_encoded}"
 
                             # 공유 방법들
                             share_col1, share_col2 = st.columns(2)
