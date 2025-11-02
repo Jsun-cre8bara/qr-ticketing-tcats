@@ -2,6 +2,10 @@
 티켓츠 QR 발권 시스템 - 설정 파일
 """
 
+# 앱 기본 URL (Streamlit Cloud 배포 URL)
+# 실제 배포 후 업데이트 필요
+APP_URL = "https://qr-ticketing-tcats.streamlit.app"
+
 # QR 코드 유효 시간 (시간 단위)
 QR_VALID_HOURS = 4
 
