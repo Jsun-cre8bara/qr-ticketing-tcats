@@ -4,7 +4,7 @@
 
 # 앱 기본 URL (Streamlit Cloud 배포 URL)
 # 실제 배포 후 업데이트 필요
-APP_URL = "https://qr-ticketing-tcats.streamlit.app"
+APP_URL = "https://qr-ticketing-tcats-gogo.streamlit.app"
 
 # QR 코드 유효 시간 (시간 단위)
 QR_VALID_HOURS = 4
