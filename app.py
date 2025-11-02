@@ -7,7 +7,7 @@ import json
 import os
 import random
 import time
-from config import COLORS, REGIONS, STAMP_BENEFITS, SMS_CONFIG
+from config import COLORS, REGIONS, STAMP_BENEFITS, SMS_CONFIG, SEAT_LAYOUT
 
 # 페이지 설정
 st.set_page_config(
@@ -89,6 +89,15 @@ st.markdown(f"""
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
     }}
     
+    .seat-badge {{
+        display: inline-block;
+        padding: 0.5rem 1rem;
+        margin: 0.25rem;
+        border-radius: 8px;
+        font-weight: bold;
+        font-size: 0.9rem;
+    }}
+    
     .success-box {{
         background: #d4edda;
         border-left: 5px solid {COLORS['success']};
@@ -157,6 +166,10 @@ if 'verification_attempts' not in st.session_state:
 if 'is_verified' not in st.session_state:
     st.session_state.is_verified = False
 
+# 좌석 선택 관련 세션 상태
+if 'selected_seats' not in st.session_state:
+    st.session_state.selected_seats = []
+
 # 데이터 폴더 생성
 os.makedirs('data', exist_ok=True)
 
@@ -209,6 +222,46 @@ def get_remaining_time():
     elapsed = (datetime.now() - st.session_state.verification_time).total_seconds()
     remaining = (SMS_CONFIG['valid_minutes'] * 60) - elapsed
     return max(0, int(remaining))
+
+def get_occupied_seats(performance, date, session):
+    """이미 예약된 좌석 목록 가져오기"""
+    try:
+        df = load_reservations()
+        if df is None:
+            return []
+        
+        occupied = df[
+            (df['공연명'] == performance) &
+            (df['공연일시'] == date) &
+            (df['회차'] == session) &
+            (df['좌석번호'].notna()) &
+            (df['좌석번호'] != '')
+        ]['좌석번호'].tolist()
+        
+        return occupied
+    except:
+        return []
+
+def get_available_seats(performance):
+    """선택 가능한 좌석 목록 생성"""
+    if performance not in SEAT_LAYOUT:
+        return []
+    
+    available_seats = []
+    sections = SEAT_LAYOUT[performance]['sections']
+    
+    for section in sections:
+        for row in section['rows']:
+            for num in range(1, section['seats_per_row'] + 1):
+                seat_id = f"{row}-{num:02d}"
+                available_seats.append({
+                    'seat_id': seat_id,
+                    'section': section['name'],
+                    'price': section['price'],
+                    'color': section['color']
+                })
+    
+    return available_seats
 
 def generate_qr_code(ticket_data):
     """QR 코드 생성"""
@@ -269,6 +322,7 @@ with st.sidebar:
         st.session_state.verification_time = None
         st.session_state.verification_attempts = 0
         st.session_state.is_verified = False
+        st.session_state.selected_seats = []
         st.rerun()
     
     st.markdown("---")
@@ -281,6 +335,8 @@ with st.sidebar:
         st.info("2️⃣ 본인 확인")
     elif st.session_state.step == 2.5:
         st.info("📱 SMS 인증")
+    elif st.session_state.step == 2.7:
+        st.info("🪑 좌석 선택")
     elif st.session_state.step == 3:
         st.info("3️⃣ QR 발권")
 
@@ -490,16 +546,22 @@ elif st.session_state.step == 2.5:
                 st.warning("⚠️ 인증번호를 입력해주세요.")
             elif st.session_state.verification_attempts >= SMS_CONFIG['max_attempts']:
                 st.error("❌ 최대 시도 횟수를 초과했습니다. 처음부터 다시 시도해주세요.")
-                if st.button("🔄 처음으로 돌아가기"):
-                    st.session_state.step = 1
-                    st.session_state.verification_code = None
-                    st.session_state.verification_time = None
-                    st.session_state.verification_attempts = 0
-                    st.rerun()
             elif user_code == st.session_state.verification_code:
                 st.session_state.is_verified = True
-                st.session_state.step = 3
-                st.success("✅ 인증 성공! QR 발권 페이지로 이동합니다...")
+                
+                # 비지정석이 있는지 확인
+                has_unassigned = any(
+                    pd.isna(row['좌석번호']) or row['좌석번호'] == ''
+                    for _, row in user_data.iterrows()
+                )
+                
+                if has_unassigned:
+                    st.session_state.step = 2.7  # 좌석 선택 단계
+                    st.success("✅ 인증 성공! 좌석 선택 페이지로 이동합니다...")
+                else:
+                    st.session_state.step = 3  # 바로 QR 발권
+                    st.success("✅ 인증 성공! QR 발권 페이지로 이동합니다...")
+                
                 time.sleep(1)
                 st.rerun()
             else:
@@ -526,6 +588,111 @@ elif st.session_state.step == 2.5:
                 st.rerun()
     
     st.markdown('</div>', unsafe_allow_html=True)
+
+# ==================== Step 2.7: 좌석 선택 (신규!) ====================
+elif st.session_state.step == 2.7:
+    user_data = st.session_state.verified_user
+    perf = st.session_state.selected_performance
+    
+    # 비지정석 개수 확인
+    unassigned_count = sum(
+        1 for _, row in user_data.iterrows()
+        if pd.isna(row['좌석번호']) or row['좌석번호'] == ''
+    )
+    
+    st.markdown('<div class="step-card">', unsafe_allow_html=True)
+    st.subheader("🪑 좌석 선택")
+    
+    st.info(f"🎫 비지정석 **{unassigned_count}장**의 좌석을 선택해주세요!")
+    
+    # 선택 가능한 좌석 목록
+    all_seats = get_available_seats(perf['공연명'])
+    occupied_seats = get_occupied_seats(perf['공연명'], perf['공연일시'], perf['회차'])
+    
+    # 이미 예약된 좌석 제외
+    available_seats = [
+        seat for seat in all_seats
+        if seat['seat_id'] not in occupied_seats and seat['seat_id'] not in st.session_state.selected_seats
+    ]
+    
+    # 구역별로 그룹화
+    sections = {}
+    for seat in available_seats:
+        section_name = seat['section']
+        if section_name not in sections:
+            sections[section_name] = []
+        sections[section_name].append(seat)
+    
+    # 구역별 표시
+    st.write("### 🎭 구역별 좌석")
+    
+    for section_name, seats in sections.items():
+        with st.expander(f"{section_name} ({len(seats)}석 가능)", expanded=True):
+            # 가격 정보
+            st.write(f"💰 가격: {seats[0]['price']:,}원")
+            
+            # 좌석 선택 (multiselect)
+            seat_options = [seat['seat_id'] for seat in seats]
+            
+            # 이미 선택된 좌석 중 이 구역에 속한 것들
+            selected_in_section = [s for s in st.session_state.selected_seats if s in seat_options]
+            
+            # 남은 선택 가능 개수
+            remaining = unassigned_count - len(st.session_state.selected_seats)
+            
+            selected = st.multiselect(
+                f"좌석 선택 (최대 {remaining}석)",
+                seat_options,
+                default=selected_in_section,
+                key=f"seats_{section_name}",
+                max_selections=remaining if remaining > 0 else 0
+            )
+            
+            # 선택 업데이트
+            # 기존 선택에서 이 구역 것들 제거
+            st.session_state.selected_seats = [
+                s for s in st.session_state.selected_seats if s not in seat_options
+            ]
+            # 새로 선택된 것들 추가
+            st.session_state.selected_seats.extend(selected)
+    
+    # 선택된 좌석 요약
+    if st.session_state.selected_seats:
+        st.write("### ✅ 선택된 좌석")
+        st.success(f"{', '.join(sorted(st.session_state.selected_seats))}")
+    
+    st.markdown('</div>', unsafe_allow_html=True)
+    
+    # 다음 단계 버튼
+    col1, col2 = st.columns([1, 2])
+    
+    with col1:
+        if st.button("← 이전", use_container_width=True):
+            st.session_state.step = 2.5
+            st.session_state.selected_seats = []
+            st.rerun()
+    
+    with col2:
+        if len(st.session_state.selected_seats) == unassigned_count:
+            if st.button("✅ 좌석 확정", type="primary", use_container_width=True):
+                # 선택한 좌석을 user_data에 반영
+                unassigned_idx = 0
+                for idx, row in user_data.iterrows():
+                    if pd.isna(row['좌석번호']) or row['좌석번호'] == '':
+                        st.session_state.verified_user.at[idx, '좌석번호'] = st.session_state.selected_seats[unassigned_idx]
+                        unassigned_idx += 1
+                
+                st.session_state.step = 3
+                st.success("✅ 좌석이 확정되었습니다!")
+                time.sleep(1)
+                st.rerun()
+        else:
+            remaining = unassigned_count - len(st.session_state.selected_seats)
+            st.button(
+                f"좌석 {remaining}개 더 선택해주세요",
+                disabled=True,
+                use_container_width=True
+            )
 
 # ==================== Step 3: QR 발권 ====================
 elif st.session_state.step == 3:
@@ -626,6 +793,7 @@ elif st.session_state.step == 3:
             st.session_state.verification_time = None
             st.session_state.verification_attempts = 0
             st.session_state.is_verified = False
+            st.session_state.selected_seats = []
             st.rerun()
 
 # ==================== Step 4: 스탬프북 ====================
@@ -656,4 +824,4 @@ elif st.session_state.step == 4:
 
 # 푸터
 st.markdown("---")
-st.caption("🎫 티켓츠 QR 발권 시스템 v2.0-A - Phase 2.0-A (모의 SMS 인증)")
+st.caption("🎫 티켓츠 QR 발권 시스템 v2.1 - Phase 2.1 (좌석 선택 UI)")
