@@ -283,11 +283,21 @@ def get_available_seats(performance):
         # 각 섹션 처리
         for section in sections:
             try:
+                # section이 dictionary인지 확인
+                if not isinstance(section, dict):
+                    st.warning(f"⚠️ 잘못된 섹션 데이터 형식: {type(section)}")
+                    continue
+                
                 section_name = section.get('name', '알 수 없음')
                 rows = section.get('rows', [])
                 seats_per_row = section.get('seats_per_row', 0)
                 price = section.get('price', 0)
                 color = section.get('color', '#CCCCCC')
+                
+                # rows가 리스트인지 확인
+                if not isinstance(rows, list):
+                    st.warning(f"⚠️ {section_name}: rows가 리스트가 아닙니다")
+                    continue
                 
                 for row in rows:
                     for num in range(1, seats_per_row + 1):
@@ -298,6 +308,9 @@ def get_available_seats(performance):
                             'price': price,
                             'color': color
                         })
+            except AttributeError as e:
+                st.warning(f"⚠️ 섹션 속성 오류: {e}")
+                continue
             except Exception as e:
                 st.warning(f"⚠️ 섹션 처리 중 오류: {e}")
                 continue
@@ -659,11 +672,33 @@ elif st.session_state.step == 2.7:
     
     st.info(f"🎫 비지정석 **{unassigned_count}장**의 좌석을 선택해주세요!")
     
+    # 디버깅: 공연명 확인
+    with st.expander("🔍 디버깅 정보", expanded=False):
+        st.write(f"**선택된 공연명:** {perf['공연명']}")
+        st.write(f"**SEAT_LAYOUT에 있는 공연들:** {list(SEAT_LAYOUT.keys())}")
+        st.write(f"**공연명이 SEAT_LAYOUT에 있나요?** {perf['공연명'] in SEAT_LAYOUT}")
+        
+        if perf['공연명'] in SEAT_LAYOUT:
+            layout = SEAT_LAYOUT[perf['공연명']]
+            st.write(f"**Layout 타입:** {type(layout)}")
+            st.write(f"**Layout keys:** {layout.keys() if isinstance(layout, dict) else 'Not a dict'}")
+            
+            if 'sections' in layout:
+                sections = layout['sections']
+                st.write(f"**Sections 타입:** {type(sections)}")
+                st.write(f"**Sections 개수:** {len(sections) if isinstance(sections, list) else 'Not a list'}")
+                
+                if isinstance(sections, list) and len(sections) > 0:
+                    st.write(f"**첫 번째 section 타입:** {type(sections[0])}")
+                    if isinstance(sections[0], dict):
+                        st.write(f"**첫 번째 section keys:** {sections[0].keys()}")
+    
     # 선택 가능한 좌석 목록
     all_seats = get_available_seats(perf['공연명'])
     
     if not all_seats:
         st.error("❌ 선택 가능한 좌석이 없습니다.")
+        st.warning("⚠️ config.py 파일을 확인해주세요.")
         st.markdown('</div>', unsafe_allow_html=True)
         
         if st.button("← 이전", use_container_width=True):
