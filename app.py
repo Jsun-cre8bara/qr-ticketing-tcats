@@ -460,7 +460,7 @@ if not st.session_state.is_companion:
 
 # ==================== 동반자 정보 등록 화면 ====================
 
-if st.session_state.is_companion:
+if st.session_state.is_companion and st.session_state.step != 4:
     ticket_data = st.session_state.companion_ticket_data
 
     # Step 1: 티켓 정보 확인
@@ -627,7 +627,11 @@ if st.session_state.is_companion:
 
                             st.session_state.companion_ticket = companion_ticket
                             st.session_state.step = 4
-                        st.rerun()
+                            st.success("✅ 등록이 완료되었습니다! QR 코드를 확인하세요.")
+                            time.sleep(1)
+                            st.rerun()
+                        else:
+                            st.error("❌ 정보 저장 중 오류가 발생했습니다. 다시 시도해주세요.")
 
 # ==================== Step 1: 공연 선택 ====================
 elif st.session_state.step == 1:
