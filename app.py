@@ -1017,12 +1017,12 @@ elif st.session_state.step == 3:
                     ''', unsafe_allow_html=True)
                     
                     col1, col2, col3 = st.columns([1, 2, 1])
-                    
+
                     with col2:
                         st.image(qr_image, width=300)
-                        
+
                         col_a, col_b = st.columns(2)
-                        
+
                         with col_a:
                             st.download_button(
                                 label="💾 저장",
@@ -1031,17 +1031,21 @@ elif st.session_state.step == 3:
                                 mime="image/png",
                                 use_container_width=True
                             )
-                        
+
                         with col_b:
                             # 공유 버튼
-                            if st.button(f"📤 공유", key=f"share_btn_{idx}", use_container_width=True):
+                            share_button_label = "🔙 닫기" if st.session_state.show_share_for_ticket == idx else "📤 공유"
+                            if st.button(share_button_label, key=f"share_btn_{idx}", use_container_width=True):
                                 if st.session_state.show_share_for_ticket == idx:
                                     st.session_state.show_share_for_ticket = None
                                 else:
                                     st.session_state.show_share_for_ticket = idx
-                        
-                        # 공유 옵션 표시
-                        if st.session_state.show_share_for_ticket == idx:
+                                st.rerun()
+
+                        st.caption(f"⏰ 유효시간: {expire_time.strftime('%Y-%m-%d %H:%M')}까지")
+
+                    # 공유 옵션 표시 (col2 밖으로 이동)
+                    if st.session_state.show_share_for_ticket == idx:
                             st.markdown("---")
                             st.write("### 📤 공유 방법 선택")
 
@@ -1057,10 +1061,10 @@ elif st.session_state.step == 3:
 
                             # 공유 링크 QR 코드 생성
                             share_qr = qrcode.QRCode(
-                                version=1,
+                                version=None,  # 자동 크기 조정
                                 error_correction=qrcode.constants.ERROR_CORRECT_L,
-                                box_size=8,
-                                border=2,
+                                box_size=10,
+                                border=4,
                             )
                             share_qr.add_data(display_url)
                             share_qr.make(fit=True)
@@ -1080,7 +1084,7 @@ elif st.session_state.step == 3:
 
                             qr_col1, qr_col2, qr_col3 = st.columns([1, 2, 1])
                             with qr_col2:
-                                st.image(share_qr_bytes, width=250)
+                                st.image(share_qr_bytes, width=300)
                                 st.download_button(
                                     label="💾 QR 코드 저장",
                                     data=share_qr_bytes,
@@ -1088,6 +1092,11 @@ elif st.session_state.step == 3:
                                     mime="image/png",
                                     use_container_width=True
                                 )
+
+                                # 디버깅 정보
+                                with st.expander("🔍 링크 정보 확인"):
+                                    st.caption(f"URL 길이: {len(display_url)} 문자")
+                                    st.text_area("전체 URL", display_url, height=150, key=f"debug_url_{idx}")
 
                             st.markdown("---")
                             st.write("### 💬 메시지로 공유하기")
@@ -1139,9 +1148,7 @@ elif st.session_state.step == 3:
 
                             st.markdown("---")
                             st.info("💡 **동반자가 링크를 클릭하거나 QR을 스캔하면 정보 등록 후 입장 QR을 받을 수 있습니다!**")
-                        
-                        st.caption(f"⏰ 유효시간: {expire_time.strftime('%Y-%m-%d %H:%M')}까지")
-                    
+
                     st.markdown("---")
         
         if st.button("🔄 처음으로 돌아가기", use_container_width=True):
