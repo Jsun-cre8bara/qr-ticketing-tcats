@@ -1017,131 +1017,122 @@ elif st.session_state.step == 3:
                     ''', unsafe_allow_html=True)
                     
                     col1, col2, col3 = st.columns([1, 2, 1])
-                    
+
                     with col2:
                         st.image(qr_image, width=300)
-                        
-                        col_a, col_b = st.columns(2)
-                        
-                        with col_a:
+
+                        st.download_button(
+                            label="💾 저장",
+                            data=qr_image,
+                            file_name=f"ticket_{row['예매번호']}_{idx+1}.png",
+                            mime="image/png",
+                            use_container_width=True
+                        )
+
+                        st.caption(f"⏰ 유효시간: {expire_time.strftime('%Y-%m-%d %H:%M')}까지")
+
+                    # 공유 옵션 표시 (expander 사용)
+                    with st.expander("📤 동반자에게 공유하기", expanded=False):
+                        # 동반자 등록 링크 생성
+                        ticket_json = json.dumps(ticket_data, ensure_ascii=False)
+
+                        # ticket_data를 URL safe하게 인코딩
+                        import urllib.parse
+                        encoded_ticket = urllib.parse.quote(ticket_json)
+
+                        # 전체 URL 생성 (config의 APP_URL 사용)
+                        display_url = f"{APP_URL}?companion=true&ticket_data={encoded_ticket}"
+
+                        # 공유 링크 QR 코드 생성
+                        share_qr = qrcode.QRCode(
+                            version=None,  # 자동 크기 조정
+                            error_correction=qrcode.constants.ERROR_CORRECT_L,
+                            box_size=10,
+                            border=4,
+                        )
+                        share_qr.add_data(display_url)
+                        share_qr.make(fit=True)
+                        share_qr_img = share_qr.make_image(fill_color="black", back_color="white")
+
+                        share_qr_buf = BytesIO()
+                        share_qr_img.save(share_qr_buf, format='PNG')
+                        share_qr_bytes = share_qr_buf.getvalue()
+
+                        # QR 코드 표시
+                        st.markdown("""
+                        <div class="info-box" style="text-align: center;">
+                            <h4>📱 QR 코드로 공유하기</h4>
+                            <p>동반자에게 아래 QR 코드를 스캔하도록 안내하세요!</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                        qr_col1, qr_col2, qr_col3 = st.columns([1, 2, 1])
+                        with qr_col2:
+                            st.image(share_qr_bytes, width=300)
                             st.download_button(
-                                label="💾 저장",
-                                data=qr_image,
-                                file_name=f"ticket_{row['예매번호']}_{idx+1}.png",
+                                label="💾 QR 코드 저장",
+                                data=share_qr_bytes,
+                                file_name=f"share_qr_{row['예매번호']}_{idx+1}.png",
                                 mime="image/png",
                                 use_container_width=True
                             )
-                        
-                        with col_b:
-                            # 공유 버튼
-                            if st.button(f"📤 공유", key=f"share_btn_{idx}", use_container_width=True):
-                                if st.session_state.show_share_for_ticket == idx:
-                                    st.session_state.show_share_for_ticket = None
-                                else:
-                                    st.session_state.show_share_for_ticket = idx
-                        
-                        # 공유 옵션 표시
-                        if st.session_state.show_share_for_ticket == idx:
-                            st.markdown("---")
-                            st.write("### 📤 공유 방법 선택")
 
-                            # 동반자 등록 링크 생성
-                            ticket_json = json.dumps(ticket_data, ensure_ascii=False)
+                            # 디버깅 정보
+                            with st.expander("🔍 링크 정보 확인"):
+                                st.caption(f"URL 길이: {len(display_url)} 문자")
+                                st.text_area("전체 URL", display_url, height=150, key=f"debug_url_{idx}")
 
-                            # ticket_data를 URL safe하게 인코딩
-                            import urllib.parse
-                            encoded_ticket = urllib.parse.quote(ticket_json)
+                        st.markdown("---")
+                        st.write("### 💬 메시지로 공유하기")
 
-                            # 전체 URL 생성 (config의 APP_URL 사용)
-                            display_url = f"{APP_URL}?companion=true&ticket_data={encoded_ticket}"
+                        # 공유 방법들
+                        share_col1, share_col2 = st.columns(2)
 
-                            # 공유 링크 QR 코드 생성
-                            share_qr = qrcode.QRCode(
-                                version=1,
-                                error_correction=qrcode.constants.ERROR_CORRECT_L,
-                                box_size=8,
-                                border=2,
-                            )
-                            share_qr.add_data(display_url)
-                            share_qr.make(fit=True)
-                            share_qr_img = share_qr.make_image(fill_color="black", back_color="white")
+                        with share_col1:
+                            # SMS 공유
+                            sms_text = f"[티켓츠] {ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
+                            sms_url = f"sms:?&body={urllib.parse.quote(sms_text)}"
 
-                            share_qr_buf = BytesIO()
-                            share_qr_img.save(share_qr_buf, format='PNG')
-                            share_qr_bytes = share_qr_buf.getvalue()
+                            st.markdown(f'''
+                                <a href="{sms_url}" target="_blank" style="text-decoration: none;">
+                                    <button style="width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                                        📱 SMS로 전송
+                                    </button>
+                                </a>
+                            ''', unsafe_allow_html=True)
 
-                            # QR 코드 표시
-                            st.markdown("""
-                            <div class="info-box" style="text-align: center;">
-                                <h4>📱 QR 코드로 공유하기</h4>
-                                <p>동반자에게 아래 QR 코드를 스캔하도록 안내하세요!</p>
-                            </div>
-                            """, unsafe_allow_html=True)
+                            st.write("")
 
-                            qr_col1, qr_col2, qr_col3 = st.columns([1, 2, 1])
-                            with qr_col2:
-                                st.image(share_qr_bytes, width=250)
-                                st.download_button(
-                                    label="💾 QR 코드 저장",
-                                    data=share_qr_bytes,
-                                    file_name=f"share_qr_{row['예매번호']}_{idx+1}.png",
-                                    mime="image/png",
-                                    use_container_width=True
-                                )
+                            # 이메일 공유
+                            email_subject = f"[티켓츠] {ticket_data['공연명']} 입장권 공유"
+                            email_body = f"안녕하세요!\n\n{ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
+                            email_url = f"mailto:?subject={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}"
 
-                            st.markdown("---")
-                            st.write("### 💬 메시지로 공유하기")
+                            st.markdown(f'''
+                                <a href="{email_url}" target="_blank" style="text-decoration: none;">
+                                    <button style="width: 100%; padding: 12px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
+                                        📧 이메일로 전송
+                                    </button>
+                                </a>
+                            ''', unsafe_allow_html=True)
 
-                            # 공유 방법들
-                            share_col1, share_col2 = st.columns(2)
+                        with share_col2:
+                            # 카카오톡 공유 (웹 링크)
+                            if st.button("💬 카카오톡 공유", key=f"kakao_{idx}", use_container_width=True):
+                                st.info("🔗 아래 링크를 복사해서 카카오톡으로 전송하세요!")
+                                st.text_area("링크", display_url, height=100, key=f"kakao_url_{idx}")
 
-                            with share_col1:
-                                # SMS 공유
-                                sms_text = f"[티켓츠] {ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
-                                sms_url = f"sms:?&body={urllib.parse.quote(sms_text)}"
+                            st.write("")
 
-                                st.markdown(f'''
-                                    <a href="{sms_url}" target="_blank" style="text-decoration: none;">
-                                        <button style="width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
-                                            📱 SMS로 전송
-                                        </button>
-                                    </a>
-                                ''', unsafe_allow_html=True)
+                            # 링크 복사
+                            if st.button("🔗 링크 복사", key=f"copy_{idx}", use_container_width=True):
+                                st.success("✅ 링크가 준비되었습니다!")
+                                st.text_area("링크", display_url, height=100, key=f"copy_url_{idx}")
+                                st.caption("👆 위 링크를 복사해서 전송하세요")
 
-                                st.write("")
+                        st.markdown("---")
+                        st.info("💡 **동반자가 링크를 클릭하거나 QR을 스캔하면 정보 등록 후 입장 QR을 받을 수 있습니다!**")
 
-                                # 이메일 공유
-                                email_subject = f"[티켓츠] {ticket_data['공연명']} 입장권 공유"
-                                email_body = f"안녕하세요!\n\n{ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
-                                email_url = f"mailto:?subject={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}"
-
-                                st.markdown(f'''
-                                    <a href="{email_url}" target="_blank" style="text-decoration: none;">
-                                        <button style="width: 100%; padding: 12px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
-                                            📧 이메일로 전송
-                                        </button>
-                                    </a>
-                                ''', unsafe_allow_html=True)
-
-                            with share_col2:
-                                # 카카오톡 공유 (웹 링크)
-                                if st.button("💬 카카오톡 공유", key=f"kakao_{idx}", use_container_width=True):
-                                    st.info("🔗 아래 링크를 복사해서 카카오톡으로 전송하세요!")
-                                    st.text_area("링크", display_url, height=100, key=f"kakao_url_{idx}")
-
-                                st.write("")
-
-                                # 링크 복사
-                                if st.button("🔗 링크 복사", key=f"copy_{idx}", use_container_width=True):
-                                    st.success("✅ 링크가 준비되었습니다!")
-                                    st.text_area("링크", display_url, height=100, key=f"copy_url_{idx}")
-                                    st.caption("👆 위 링크를 복사해서 전송하세요")
-
-                            st.markdown("---")
-                            st.info("💡 **동반자가 링크를 클릭하거나 QR을 스캔하면 정보 등록 후 입장 QR을 받을 수 있습니다!**")
-                        
-                        st.caption(f"⏰ 유효시간: {expire_time.strftime('%Y-%m-%d %H:%M')}까지")
-                    
                     st.markdown("---")
         
         if st.button("🔄 처음으로 돌아가기", use_container_width=True):
