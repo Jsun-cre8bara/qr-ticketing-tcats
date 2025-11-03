@@ -184,6 +184,16 @@ if 'show_share_for_ticket' not in st.session_state:
 if 'companion_ticket' not in st.session_state:
     st.session_state.companion_ticket = None
 
+# 동반자 프로세스 단계
+if 'companion_step' not in st.session_state:
+    st.session_state.companion_step = 1  # 1: 정보확인, 2: PASS인증, 3: 정보입력
+
+# PASS 인증 관련
+if 'pass_verified' not in st.session_state:
+    st.session_state.pass_verified = False
+if 'pass_verification_code' not in st.session_state:
+    st.session_state.pass_verification_code = None
+
 # 데이터 폴더 생성
 os.makedirs('data', exist_ok=True)
 
@@ -393,18 +403,27 @@ with st.sidebar:
         st.session_state.tickets = []
         st.session_state.is_companion = False
         st.session_state.companion_ticket_data = None
+        st.session_state.companion_step = 1
+        st.session_state.pass_verified = False
+        st.session_state.pass_verification_code = None
         st.session_state.verification_code = None
         st.session_state.verification_time = None
         st.session_state.verification_attempts = 0
         st.session_state.is_verified = False
         st.session_state.selected_seats = []
         st.session_state.show_share_for_ticket = None
+        st.session_state.companion_ticket = None
         st.rerun()
     
     st.markdown("---")
     st.caption("현재 단계:")
     if st.session_state.is_companion:
-        st.info("👥 동반자 정보 등록")
+        if st.session_state.companion_step == 1:
+            st.info("🎫 티켓 정보 확인")
+        elif st.session_state.companion_step == 2:
+            st.info("🔐 PASS 본인 인증")
+        elif st.session_state.companion_step == 3:
+            st.info("👥 동반자 정보 입력")
     elif st.session_state.step == 1:
         st.info("1️⃣ 공연 선택")
     elif st.session_state.step == 2:
@@ -442,91 +461,173 @@ if not st.session_state.is_companion:
 # ==================== 동반자 정보 등록 화면 ====================
 
 if st.session_state.is_companion:
-    st.markdown('<div class="step-card">', unsafe_allow_html=True)
-    st.subheader("👥 동반자 정보 등록")
-    
     ticket_data = st.session_state.companion_ticket_data
-    
-    st.markdown(f"""
-    <div class="info-box">
-        <h4>📋 티켓 정보</h4>
-        <p><strong>공연:</strong> {ticket_data.get('공연명', 'N/A')}</p>
-        <p><strong>일시:</strong> {ticket_data.get('공연일시', 'N/A')} {ticket_data.get('회차', 'N/A')}</p>
-        <p><strong>좌석:</strong> {ticket_data.get('좌석번호', '비지정석')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    st.write("### ✅ 동반자 정보를 등록하고 입장 QR을 받으세요!")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        comp_name = st.text_input("이름*", placeholder="홍길동", key="comp_name")
-        comp_phone = st.text_input("전화번호*", placeholder="010-1234-5678", key="comp_phone")
-        comp_birth = st.date_input("생년월일*", 
-                                     min_value=datetime(1900, 1, 1),
-                                     max_value=datetime.now(),
-                                     value=datetime(1990, 1, 1),
-                                     key="comp_birth")
-    
-    with col2:
-        comp_gender = st.selectbox("성별*", ["선택", "남성", "여성", "기타"], key="comp_gender")
-        comp_region = st.selectbox("거주지역*", ["선택"] + REGIONS, key="comp_region")
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    if st.button("✅ 등록하고 입장권 받기", type="primary", use_container_width=True):
-        if not comp_name or not comp_phone or comp_gender == "선택" or comp_region == "선택":
-            st.warning("⚠️ 모든 정보를 입력해주세요.")
-        else:
-            # 중복 등록 체크
-            file_path = 'data/companion_info.csv'
-            is_duplicate = False
-            
-            if os.path.exists(file_path):
-                try:
-                    existing_df = pd.read_csv(file_path)
-                    # 같은 전화번호와 예매번호, 좌석번호로 이미 등록되었는지 확인
-                    is_duplicate = not existing_df[
-                        (existing_df['전화번호'] == comp_phone) &
-                        (existing_df['예매번호'] == ticket_data.get('예매번호', 'N/A')) &
-                        (existing_df['좌석번호'] == ticket_data.get('좌석번호', '비지정석'))
-                    ].empty
-                except:
-                    pass
-            
-            if is_duplicate:
-                st.error("❌ 이미 등록된 티켓입니다. 중복 등록은 불가합니다.")
-            else:
-                companion_data = {
-                    "등록일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "예매번호": ticket_data.get('예매번호', 'N/A'),
-                    "공연명": ticket_data.get('공연명', 'N/A'),
-                    "좌석번호": ticket_data.get('좌석번호', '비지정석'),
-                    "이름": comp_name,
-                    "전화번호": comp_phone,
-                    "생년월일": comp_birth.strftime("%Y-%m-%d"),
-                    "성별": comp_gender,
-                    "거주지역": comp_region
-                }
-                
-                if save_companion_info(companion_data):
-                    # 동반자용 티켓 데이터 생성
-                    companion_ticket = {
-                        "예매번호": ticket_data.get('예매번호', 'N/A'),
-                        "이름": comp_name,
-                        "공연명": ticket_data.get('공연명', 'N/A'),
-                        "공연일시": ticket_data.get('공연일시', 'N/A'),
-                        "회차": ticket_data.get('회차', 'N/A'),
-                        "좌석번호": ticket_data.get('좌석번호', '비지정석'),
-                        "발급시간": ticket_data.get('발급시간', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
-                        "만료시간": ticket_data.get('만료시간', (datetime.now() + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")),
-                        "동반자": comp_name
-                    }
-                    
-                    st.session_state.companion_ticket = companion_ticket
-                    st.session_state.step = 4
+
+    # Step 1: 티켓 정보 확인
+    if st.session_state.companion_step == 1:
+        st.markdown('<div class="step-card">', unsafe_allow_html=True)
+        st.subheader("🎫 티켓 정보 확인")
+
+        # 예매자 및 공연 정보 표시
+        st.markdown(f"""
+        <div class="ticket-card">
+            <h3>🎭 {ticket_data.get('공연명', 'N/A')}</h3>
+            <p style="font-size: 1.2rem; margin-top: 1rem;">
+                <strong>📅 공연일시:</strong> {ticket_data.get('공연일시', 'N/A')} {ticket_data.get('회차', 'N/A')}<br>
+                <strong>🪑 좌석:</strong> {ticket_data.get('좌석번호', '비지정석')}<br>
+                <strong>👤 예매자:</strong> {ticket_data.get('이름', 'N/A')}님
+            </p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("""
+        <div class="info-box">
+            <h4>📋 안내사항</h4>
+            <p>• 예매자님께서 이 티켓을 공유하셨습니다.</p>
+            <p>• 발권을 위해서는 본인 인증이 필요합니다.</p>
+            <p>• 인증 후 동반자 정보를 등록하시면 입장 QR을 받으실 수 있습니다.</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        if st.button("🎫 발권 다운로드", type="primary", use_container_width=True):
+            st.session_state.companion_step = 2
+            st.rerun()
+
+    # Step 2: PASS 본인 인증
+    elif st.session_state.companion_step == 2:
+        st.markdown('<div class="step-card">', unsafe_allow_html=True)
+        st.subheader("🔐 PASS 본인 인증")
+
+        st.info("📱 PASS 앱을 통한 본인 인증이 필요합니다.")
+
+        # PASS 인증 모의
+        if not st.session_state.pass_verified:
+            st.markdown("""
+            <div class="verification-box">
+                <h3>📱 PASS 인증</h3>
+                <p>실제 서비스에서는 PASS 앱으로 본인 인증을 진행합니다.</p>
+                <p style="font-size: 0.9rem; opacity: 0.8;">(테스트 버전에서는 아래 버튼으로 인증됩니다)</p>
+            </div>
+            """, unsafe_allow_html=True)
+
+            col1, col2 = st.columns([1, 1])
+
+            with col1:
+                if st.button("✅ PASS 인증하기", type="primary", use_container_width=True):
+                    st.session_state.pass_verified = True
+                    st.success("✅ PASS 인증이 완료되었습니다!")
+                    time.sleep(1)
+                    st.session_state.companion_step = 3
+                    st.rerun()
+
+            with col2:
+                if st.button("← 이전", use_container_width=True):
+                    st.session_state.companion_step = 1
+                    st.rerun()
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+    # Step 3: 동반자 정보 입력
+    elif st.session_state.companion_step == 3:
+        if not st.session_state.pass_verified:
+            st.error("❌ PASS 인증이 필요합니다.")
+            st.session_state.companion_step = 2
+            st.rerun()
+
+        st.markdown('<div class="step-card">', unsafe_allow_html=True)
+        st.subheader("👥 동반자 정보 등록")
+
+        st.markdown(f"""
+        <div class="info-box">
+            <h4>📋 티켓 정보</h4>
+            <p><strong>공연:</strong> {ticket_data.get('공연명', 'N/A')}</p>
+            <p><strong>일시:</strong> {ticket_data.get('공연일시', 'N/A')} {ticket_data.get('회차', 'N/A')}</p>
+            <p><strong>좌석:</strong> {ticket_data.get('좌석번호', '비지정석')}</p>
+            <p><strong>예매자:</strong> {ticket_data.get('이름', 'N/A')}님</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.write("### ✅ 동반자 정보를 등록하고 입장 QR을 받으세요!")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            comp_name = st.text_input("이름*", placeholder="홍길동", key="comp_name")
+            comp_phone = st.text_input("전화번호*", placeholder="010-1234-5678", key="comp_phone")
+            comp_birth = st.date_input("생년월일*",
+                                         min_value=datetime(1900, 1, 1),
+                                         max_value=datetime.now(),
+                                         value=datetime(1990, 1, 1),
+                                         key="comp_birth")
+
+        with col2:
+            comp_gender = st.selectbox("성별*", ["선택", "남성", "여성", "기타"], key="comp_gender")
+            comp_region = st.selectbox("거주지역*", ["선택"] + REGIONS, key="comp_region")
+
+        st.markdown('</div>', unsafe_allow_html=True)
+
+        col1, col2 = st.columns([1, 2])
+
+        with col1:
+            if st.button("← 이전", use_container_width=True):
+                st.session_state.companion_step = 2
                 st.rerun()
+
+        with col2:
+            if st.button("✅ 등록하고 입장권 받기", type="primary", use_container_width=True):
+                if not comp_name or not comp_phone or comp_gender == "선택" or comp_region == "선택":
+                    st.warning("⚠️ 모든 정보를 입력해주세요.")
+                else:
+                    # 중복 등록 체크
+                    file_path = 'data/companion_info.csv'
+                    is_duplicate = False
+
+                    if os.path.exists(file_path):
+                        try:
+                            existing_df = pd.read_csv(file_path)
+                            # 같은 전화번호와 예매번호, 좌석번호로 이미 등록되었는지 확인
+                            is_duplicate = not existing_df[
+                                (existing_df['전화번호'] == comp_phone) &
+                                (existing_df['예매번호'] == ticket_data.get('예매번호', 'N/A')) &
+                                (existing_df['좌석번호'] == ticket_data.get('좌석번호', '비지정석'))
+                            ].empty
+                        except:
+                            pass
+
+                    if is_duplicate:
+                        st.error("❌ 이미 등록된 티켓입니다. 중복 등록은 불가합니다.")
+                    else:
+                        companion_data = {
+                            "등록일시": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "예매번호": ticket_data.get('예매번호', 'N/A'),
+                            "공연명": ticket_data.get('공연명', 'N/A'),
+                            "좌석번호": ticket_data.get('좌석번호', '비지정석'),
+                            "이름": comp_name,
+                            "전화번호": comp_phone,
+                            "생년월일": comp_birth.strftime("%Y-%m-%d"),
+                            "성별": comp_gender,
+                            "거주지역": comp_region
+                        }
+
+                        if save_companion_info(companion_data):
+                            # 동반자용 티켓 데이터 생성
+                            companion_ticket = {
+                                "예매번호": ticket_data.get('예매번호', 'N/A'),
+                                "이름": comp_name,
+                                "공연명": ticket_data.get('공연명', 'N/A'),
+                                "공연일시": ticket_data.get('공연일시', 'N/A'),
+                                "회차": ticket_data.get('회차', 'N/A'),
+                                "좌석번호": ticket_data.get('좌석번호', '비지정석'),
+                                "발급시간": ticket_data.get('발급시간', datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+                                "만료시간": ticket_data.get('만료시간', (datetime.now() + timedelta(hours=4)).strftime("%Y-%m-%d %H:%M:%S")),
+                                "동반자": comp_name
+                            }
+
+                            st.session_state.companion_ticket = companion_ticket
+                            st.session_state.step = 4
+                        st.rerun()
 
 # ==================== Step 1: 공연 선택 ====================
 elif st.session_state.step == 1:
@@ -943,25 +1044,62 @@ elif st.session_state.step == 3:
                         if st.session_state.show_share_for_ticket == idx:
                             st.markdown("---")
                             st.write("### 📤 공유 방법 선택")
-                            
+
                             # 동반자 등록 링크 생성
                             ticket_json = json.dumps(ticket_data, ensure_ascii=False)
-                            
+
                             # ticket_data를 URL safe하게 인코딩
                             import urllib.parse
                             encoded_ticket = urllib.parse.quote(ticket_json)
-                            
+
                             # 전체 URL 생성 (config의 APP_URL 사용)
                             display_url = f"{APP_URL}?companion=true&ticket_data={encoded_ticket}"
-                            
+
+                            # 공유 링크 QR 코드 생성
+                            share_qr = qrcode.QRCode(
+                                version=1,
+                                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                                box_size=8,
+                                border=2,
+                            )
+                            share_qr.add_data(display_url)
+                            share_qr.make(fit=True)
+                            share_qr_img = share_qr.make_image(fill_color="black", back_color="white")
+
+                            share_qr_buf = BytesIO()
+                            share_qr_img.save(share_qr_buf, format='PNG')
+                            share_qr_bytes = share_qr_buf.getvalue()
+
+                            # QR 코드 표시
+                            st.markdown("""
+                            <div class="info-box" style="text-align: center;">
+                                <h4>📱 QR 코드로 공유하기</h4>
+                                <p>동반자에게 아래 QR 코드를 스캔하도록 안내하세요!</p>
+                            </div>
+                            """, unsafe_allow_html=True)
+
+                            qr_col1, qr_col2, qr_col3 = st.columns([1, 2, 1])
+                            with qr_col2:
+                                st.image(share_qr_bytes, width=250)
+                                st.download_button(
+                                    label="💾 QR 코드 저장",
+                                    data=share_qr_bytes,
+                                    file_name=f"share_qr_{row['예매번호']}_{idx+1}.png",
+                                    mime="image/png",
+                                    use_container_width=True
+                                )
+
+                            st.markdown("---")
+                            st.write("### 💬 메시지로 공유하기")
+
                             # 공유 방법들
                             share_col1, share_col2 = st.columns(2)
-                            
+
                             with share_col1:
                                 # SMS 공유
                                 sms_text = f"[티켓츠] {ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
                                 sms_url = f"sms:?&body={urllib.parse.quote(sms_text)}"
-                                
+
                                 st.markdown(f'''
                                     <a href="{sms_url}" target="_blank" style="text-decoration: none;">
                                         <button style="width: 100%; padding: 12px; background: #4CAF50; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
@@ -969,14 +1107,14 @@ elif st.session_state.step == 3:
                                         </button>
                                     </a>
                                 ''', unsafe_allow_html=True)
-                                
+
                                 st.write("")
-                                
+
                                 # 이메일 공유
                                 email_subject = f"[티켓츠] {ticket_data['공연명']} 입장권 공유"
                                 email_body = f"안녕하세요!\n\n{ticket_data['공연명']} 입장권을 공유합니다.\n\n공연일시: {ticket_data['공연일시']} {ticket_data['회차']}\n좌석: {ticket_data['좌석번호']}\n\n아래 링크를 클릭하여 동반자 정보를 등록해주세요:\n{display_url}"
                                 email_url = f"mailto:?subject={urllib.parse.quote(email_subject)}&body={urllib.parse.quote(email_body)}"
-                                
+
                                 st.markdown(f'''
                                     <a href="{email_url}" target="_blank" style="text-decoration: none;">
                                         <button style="width: 100%; padding: 12px; background: #2196F3; color: white; border: none; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: bold;">
@@ -984,25 +1122,23 @@ elif st.session_state.step == 3:
                                         </button>
                                     </a>
                                 ''', unsafe_allow_html=True)
-                            
+
                             with share_col2:
                                 # 카카오톡 공유 (웹 링크)
-                                kakao_text = f"[티켓츠] {ticket_data['공연명']} 입장권 공유"
-                                
                                 if st.button("💬 카카오톡 공유", key=f"kakao_{idx}", use_container_width=True):
                                     st.info("🔗 아래 링크를 복사해서 카카오톡으로 전송하세요!")
-                                    st.code(display_url, language=None)
-                                
+                                    st.text_area("링크", display_url, height=100, key=f"kakao_url_{idx}")
+
                                 st.write("")
-                                
+
                                 # 링크 복사
                                 if st.button("🔗 링크 복사", key=f"copy_{idx}", use_container_width=True):
                                     st.success("✅ 링크가 준비되었습니다!")
-                                    st.code(display_url, language=None)
+                                    st.text_area("링크", display_url, height=100, key=f"copy_url_{idx}")
                                     st.caption("👆 위 링크를 복사해서 전송하세요")
-                            
+
                             st.markdown("---")
-                            st.info("💡 **동반자가 링크를 클릭하면 정보 등록 후 입장 QR을 받을 수 있습니다!**")
+                            st.info("💡 **동반자가 링크를 클릭하거나 QR을 스캔하면 정보 등록 후 입장 QR을 받을 수 있습니다!**")
                         
                         st.caption(f"⏰ 유효시간: {expire_time.strftime('%Y-%m-%d %H:%M')}까지")
                     
@@ -1017,6 +1153,9 @@ elif st.session_state.step == 3:
             st.session_state.is_verified = False
             st.session_state.selected_seats = []
             st.session_state.show_share_for_ticket = None
+            st.session_state.companion_step = 1
+            st.session_state.pass_verified = False
+            st.session_state.pass_verification_code = None
             st.rerun()
 
 # ==================== Step 4: 동반자 등록 완료 & 스탬프북 ====================
