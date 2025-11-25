@@ -487,9 +487,13 @@ with tab2:
             
             # 선택된 회차의 예약 리스트 표시
             if 'selected_session_id' in st.session_state:
+                st.markdown("---")
+                st.markdown("# 📊 예약 상세 정보")
+                
                 session_info = st.session_state['selected_session_info']
                 
-                st.markdown("## 📊 예약 상세 정보")
+                # 선택된 회차 강조 표시
+                st.success(f"✅ 조회 중: **{session_info['name']}** - {session_info['date']} {session_info['time'] if session_info['time'] else '시간 미정'}")
                 
                 col1, col2 = st.columns(2)
                 
@@ -503,7 +507,19 @@ with tab2:
                 with col2:
                     st.metric("총 예약", f"{session_info['total']}건")
                 
-                df_reservations = get_reservations(st.session_state['selected_session_id'])
+                # 예약 데이터 조회
+                with st.spinner("예약 데이터를 조회하는 중..."):
+                    df_reservations = get_reservations(st.session_state['selected_session_id'])
+                
+                # 디버깅 정보
+                st.info(f"💾 데이터베이스에서 {len(df_reservations)}건의 예약을 찾았습니다")
+                st.write(f"**DataFrame shape:** {df_reservations.shape}")
+                st.write(f"**DataFrame columns:** {df_reservations.columns.tolist()}")
+                
+                # 강제로 구분선 추가
+                st.markdown("---")
+                st.markdown("### 🔽 아래에 예약 데이터가 표시됩니다")
+                st.markdown("---")
                 
                 if len(df_reservations) > 0:
                     # 통계
@@ -578,3 +594,17 @@ with tab2:
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         use_container_width=True
                     )
+                
+                else:
+                    st.error("❌ 해당 회차의 예약 데이터가 없습니다!")
+                    st.warning("""
+                    **가능한 원인:**
+                    1. 통합명부 작성 시 저장이 제대로 안됨
+                    2. 공연 정보만 저장되고 예약 데이터는 저장 안됨
+                    
+                    **해결 방법:**
+                    1. "📝 통합명부 작성" 탭으로 이동
+                    2. 같은 파일을 다시 업로드
+                    3. "🔄 통합하고 저장하기" 버튼 클릭
+                    4. "✅ 총 XX건이 저장되었습니다!" 메시지 확인
+                    """)
