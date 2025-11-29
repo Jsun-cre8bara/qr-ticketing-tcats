@@ -105,3 +105,83 @@
 8. ✅ 감사 로그 **180일 보존** 후 자동 삭제, Export(CSV/JSON) 제공. 향후 90/180/365일 선택 옵션 검토.
 
 > 위 확인 상태를 기준으로 한 번에 한 Task만 "진행"으로 전환하고, 완료 후 사용자 확인을 받은 뒤 다음 Task로 이동한다.
+
+## 8. 예약/좌석/QR 구현 요구사항(사용자 답변 반영)
+주니어 개발자가 바로 착수할 수 있도록 DB 스키마, 상태 머신, API, UI 요구사항을 정리했다. 모든 항목은 **PostgreSQL + Raw SQL 마이그레이션 스크립트**를 기준으로 작성했으며, 다른 마이그레이션 도구를 쓰고 싶다면 사용자에게 먼저 확인한다.
+
+### 8.1 DB 마이그레이션
+- **reservations 테이블 컬럼 추가**
+  - `token CHAR(8)` : Base36 8자리, 예약마다 고유. `UNIQUE` 제약 조건 권장.
+  - `status reservations_status` : ENUM(`pending`, `reserved_unassigned`, `reserved_assigned`, `issued`, `checked_in`, `cancelled`, `expired`).
+  - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`.
+- **ENUM 생성**: `CREATE TYPE reservations_status AS ENUM (...)`.
+- **updated_at 자동 갱신 트리거**: 모든 `UPDATE` 시 `NEW.updated_at = now()`를 강제하는 `BEFORE UPDATE` 트리거를 생성한다.
+- **seat_status 테이블(초안)**
+  - `id BIGSERIAL PRIMARY KEY`
+  - `performance_id BIGINT NOT NULL` (좌석이 속한 회차)
+  - `seat_code TEXT NOT NULL` (예: "A-10")
+  - `reservation_id BIGINT NULL` (배정된 예약 ID, 없으면 NULL)
+  - `status TEXT NOT NULL` (예: `available`, `held`, `reserved`, `checked_in` — 필요 시 사용자에게 확정 요청)
+  - `updated_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- **reservation_events 테이블**
+  - `id BIGSERIAL PRIMARY KEY`
+  - `reservation_id BIGINT NOT NULL` (FK → reservations)
+  - `event_type TEXT NOT NULL` (예: `status_transition`, `token_issued`, `token_revoked`)
+  - `prev_status reservations_status NULL`
+  - `new_status reservations_status NULL`
+  - `actor_type TEXT NOT NULL` (예: `system`, `operator`, `user`)
+  - `actor_id TEXT NULL` (연동 시스템 ID 또는 운영자 ID)
+  - `metadata JSONB DEFAULT '{}'::JSONB`
+  - `created_at TIMESTAMPTZ NOT NULL DEFAULT now()`
+- **인덱스**: `reservation_events(reservation_id, created_at DESC)`, `seat_status(performance_id, seat_code)` 권장.
+
+### 8.2 상태 머신
+- 기본 플로우: `pending → reserved_unassigned → reserved_assigned → issued → checked_in`.
+- `cancelled`: 언제든 이동 가능(단, `checked_in` 이후 역전이 금지).
+- `expired`: 회차 종료 배치 Job에서 일괄 처리.
+- `checked_in` 이후에는 다른 상태로 전환하지 않는다.
+- 상태 전환 시 `reservation_events`에 `prev_status`, `new_status`, `actor_type`, `actor_id`를 기록하고, `reservations.updated_at`은 트리거로 자동 갱신한다.
+
+### 8.3 토큰 생성/발급
+- 규칙: **Base36 8자리**, 중복 없는 고유값 생성 후 `reservations.token`에 저장.
+- 발급 시점 옵션(사용자 답변):
+  1) 예약 생성 시 즉시 발급
+  2) 좌석 지정 후 발급
+  3) 운영자가 "발급" 버튼 클릭 시 발급 **(추천)**
+- 권장 로직: 옵션 3을 기본값으로 개발하고, 옵션 1/2는 구성 플래그로 전환 가능하게 설계.
+- 토큰 생성 실패/중복 시 재시도 로직 포함, 발급 성공 시 `reservation_events`에 `token_issued` 기록.
+
+### 8.4 API 요구사항
+- **발급 API**: 내부 어드민 전용이라면 인증 생략 가능하나, 기본 가이드로 **JWT 또는 API Key** 헤더 인증을 권장.
+  - 요청: `POST /api/reservations/{id}/issue-token` (또는 `/issue`), 필요 시 `force: true` 옵션.
+  - 응답: `{ "reservation_id": ..., "token": "8자리", "status": "issued", "updated_at": "ISO8601" }`.
+- **QR 생성 API**
+  - QR 데이터: `{"r": <reservation_id>, "t": "<token>"}`
+  - 포맷: PNG
+  - 응답: `Content-Type: image/png` 바이너리 또는 `base64` JSON 둘 중 택 1. (기본: PNG 바이너리)
+- **검증/체크인**: QR 스캔 → 토큰 검증 후 상태를 `checked_in`으로 업데이트, 이벤트 로그 기록.
+
+### 8.5 좌석별 QR UI 요구사항
+- 뷰 구조: 아코디언 **Zone → Row** 2단계 그룹.
+- 각 좌석 카드: QR 이미지, 좌석코드, 상태 표시, **링크 복사**(QR 조회 링크), **PNG 다운로드** 버튼.
+- 상태별 버튼 가이드: `issued` 이상만 QR/다운로드 노출, `pending/reserved*`은 발급 버튼 노출.
+
+### 8.6 QA/테스트 기준
+- **API smoke test**: 발급/검증 기본 흐름.
+- **발급/검증 E2E test**: 생성 → 발급 → QR 생성 → 검증 → 체크인.
+- **좌석 추천/예외 케이스**: 좌석 미지정 → 배정 → 발급 경로, 중복 발급 방지, 만료 처리.
+
+### 8.7 사용자 확인 질문 리스트 (Task 시작 전)
+아래 질문에 답변을 받으면 **T1부터 순차 진행**한다. 한 번에 한 Task만 실행.
+1. ✅ DB는 **PostgreSQL** 사용이 맞나요? 마이그레이션을 **Raw SQL 스크립트**로 진행해도 될까요? (도구 변경 시 알려주세요)
+2. ✅ `seat_status.status` 값은 `available/held/reserved/checked_in`으로 진행해도 될까요? 다른 상태가 필요하면 알려주세요.
+3. ✅ QR 생성 API 응답을 **PNG 바이너리**로 기본 제공하고, `?format=base64` 옵션을 추가해도 될까요?
+4. ✅ 발급 API 인증 방식을 **JWT**로 기본 구현하고, 내부 어드민 전용이면 토글로 끌 수 있게 해도 될까요?
+
+### 8.8 신규 Task 목록 (실행 규칙: 한 번에 한 가지)
+- [ ] T5. DB 마이그레이션 SQL 작성 및 적용 (reservations 컬럼/ENUM/트리거, seat_status, reservation_events)
+- [ ] T6. 상태 머신/이벤트 로깅 구현 (`checked_in` 이후 역전 금지, `updated_at` 트리거 연동)
+- [ ] T7. 토큰 생성(8자리 Base36) + 발급 API + 중복 재시도 로직 구현
+- [ ] T8. QR 이미지 생성 API (PNG 기본, base64 옵션)
+- [ ] T9. 좌석별 QR UI (Zone→Row 아코디언, 링크 복사, PNG 다운로드)
+- [ ] T10. QA 스크립트(E2E/Smoke) 작성 및 실행
